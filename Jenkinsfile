@@ -79,8 +79,8 @@ pipeline {
                           -Dsonar.projectBaseDir=/usr/src \
                           -Dsonar.projectKey=ecommerce_application \
                           -Dsonar.projectName="Ecommerce Application" \
-                          -Dsonar.sources=backend/src,frontend/src \
-                          -Dsonar.exclusions=**/node_modules/**,**/.next/**
+                          -Dsonar.sources=. \
+                          -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/coverage/**
                     '''
                 }
             }
