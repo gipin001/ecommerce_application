@@ -4,7 +4,6 @@ pipeline {
     environment {
         DOCKER_IMAGE_BACKEND  = "ecommerce-backend"
         DOCKER_IMAGE_FRONTEND = "ecommerce-frontend"
-        SONAR_HOST_URL        = "http://sonarqube:9000"
     }
 
     options {
@@ -28,16 +27,12 @@ pipeline {
             parallel {
                 stage('Backend Deps') {
                     steps {
-                        dir('backend') {
-                            sh 'npm ci'
-                        }
+                        dir('backend') { sh 'npm ci' }
                     }
                 }
                 stage('Frontend Deps') {
                     steps {
-                        dir('frontend') {
-                            sh 'npm ci'
-                        }
+                        dir('frontend') { sh 'npm ci' }
                     }
                 }
             }
@@ -46,9 +41,7 @@ pipeline {
         // ── 3. LINT ───────────────────────────────────────────────────────
         stage('Lint') {
             steps {
-                dir('frontend') {
-                    sh 'npm run lint'
-                }
+                dir('frontend') { sh 'npm run lint' }
             }
         }
 
@@ -75,12 +68,12 @@ pipeline {
         // ── 5. SONARQUBE ANALYSIS ─────────────────────────────────────────
         stage('SonarQube Analysis') {
             steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                withSonarQubeEnv('SonarQube') {
                     sh '''
                         docker run --rm \
                           --network host \
-                          -e SONAR_HOST_URL=http://localhost:9000 \
-                          -e SONAR_TOKEN=${SONAR_TOKEN} \
+                          -e SONAR_HOST_URL=${SONAR_HOST_URL} \
+                          -e SONAR_TOKEN=${SONAR_AUTH_TOKEN} \
                           -v "$(pwd):/usr/src" \
                           sonarsource/sonar-scanner-cli:latest \
                           -Dsonar.projectBaseDir=/usr/src
@@ -92,21 +85,8 @@ pipeline {
         // ── 6. SONARQUBE QUALITY GATE ─────────────────────────────────────
         stage('Quality Gate') {
             steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            def response = sh(
-                                script: '''curl -sf -u "${SONAR_TOKEN}:" \
-                                  "http://localhost:9000/api/qualitygates/project_status?projectKey=ecommerce_application" \
-                                  | grep -o '"status":"[^"]*"' | head -1''',
-                                returnStdout: true
-                            ).trim()
-                            echo "Quality Gate result: ${response}"
-                            if (response.contains('ERROR')) {
-                                error("SonarQube Quality Gate FAILED. Fix issues before deploying.")
-                            }
-                        }
-                    }
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
