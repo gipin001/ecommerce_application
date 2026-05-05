@@ -5,8 +5,6 @@ pipeline {
         DOCKER_IMAGE_BACKEND  = "ecommerce-backend"
         DOCKER_IMAGE_FRONTEND = "ecommerce-frontend"
         SONAR_HOST_URL        = "http://sonarqube:9000"
-        // Credentials stored in Jenkins credential store (never in code)
-        SONAR_TOKEN = credentials('sonar-token')
     }
 
     options {
@@ -21,7 +19,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Branch: ${env.BRANCH_NAME} | Build: ${env.BUILD_NUMBER}"
+                echo "Build: ${env.BUILD_NUMBER}"
             }
         }
 
@@ -47,13 +45,9 @@ pipeline {
 
         // ── 3. LINT ───────────────────────────────────────────────────────
         stage('Lint') {
-            parallel {
-                stage('Frontend Lint') {
-                    steps {
-                        dir('frontend') {
-                            sh 'npm run lint'
-                        }
-                    }
+            steps {
+                dir('frontend') {
+                    sh 'npm run lint'
                 }
             }
         }
@@ -64,14 +58,14 @@ pipeline {
                 stage('Backend Tests') {
                     steps {
                         dir('backend') {
-                            sh 'npm test -- --coverage --ci 2>/dev/null || echo "No tests yet — skipping"'
+                            sh 'npm test -- --coverage --ci 2>/dev/null || echo "No tests yet - skipping"'
                         }
                     }
                 }
                 stage('Frontend Tests') {
                     steps {
                         dir('frontend') {
-                            sh 'npm test -- --coverage --ci --passWithNoTests 2>/dev/null || echo "No tests yet — skipping"'
+                            sh 'npm test -- --coverage --ci --passWithNoTests 2>/dev/null || echo "No tests yet - skipping"'
                         }
                     }
                 }
@@ -81,32 +75,36 @@ pipeline {
         // ── 5. SONARQUBE ANALYSIS ─────────────────────────────────────────
         stage('SonarQube Analysis') {
             steps {
-                sh '''
-                    docker run --rm \
-                      --network host \
-                      -e SONAR_HOST_URL=${SONAR_HOST_URL} \
-                      -e SONAR_TOKEN=${SONAR_TOKEN} \
-                      -v "$(pwd):/usr/src" \
-                      sonarsource/sonar-scanner-cli:latest \
-                      -Dsonar.projectBaseDir=/usr/src
-                '''
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        docker run --rm \
+                          --network host \
+                          -e SONAR_HOST_URL=http://localhost:9000 \
+                          -e SONAR_TOKEN=${SONAR_TOKEN} \
+                          -v "$(pwd):/usr/src" \
+                          sonarsource/sonar-scanner-cli:latest \
+                          -Dsonar.projectBaseDir=/usr/src
+                    '''
+                }
             }
         }
 
         // ── 6. SONARQUBE QUALITY GATE ─────────────────────────────────────
         stage('Quality Gate') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    script {
-                        def response = sh(
-                            script: """curl -sf -u "${SONAR_TOKEN}:" \
-                              "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=ecommerce_application" \
-                              | grep -o '"status":"[^"]*"' | head -1""",
-                            returnStdout: true
-                        ).trim()
-                        echo "Quality Gate result: ${response}"
-                        if (response.contains('ERROR')) {
-                            error("SonarQube Quality Gate FAILED. Fix issues before deploying.")
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            def response = sh(
+                                script: '''curl -sf -u "${SONAR_TOKEN}:" \
+                                  "http://localhost:9000/api/qualitygates/project_status?projectKey=ecommerce_application" \
+                                  | grep -o '"status":"[^"]*"' | head -1''',
+                                returnStdout: true
+                            ).trim()
+                            echo "Quality Gate result: ${response}"
+                            if (response.contains('ERROR')) {
+                                error("SonarQube Quality Gate FAILED. Fix issues before deploying.")
+                            }
                         }
                     }
                 }
@@ -133,47 +131,21 @@ pipeline {
             }
         }
 
-        // ── 8. DEPLOY (only on main / develop) ───────────────────────────
+        // ── 8. DEPLOY ────────────────────────────────────────────────────
         stage('Deploy') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'develop'
-                }
-            }
-            stages {
-                stage('Stop Old Containers') {
-                    steps {
-                        sh 'docker-compose down --remove-orphans || true'
-                    }
-                }
-                stage('Start App Stack') {
-                    steps {
-                        sh 'docker-compose up -d --build'
-                    }
-                }
-                stage('Run DB Migrations') {
-                    steps {
-                        sh '''
-                            sleep 10
-                            docker exec ecom_backend node src/config/migrate.js
-                        '''
-                    }
-                }
-                stage('Health Check') {
-                    steps {
-                        retry(5) {
-                            sleep(time: 10, unit: 'SECONDS')
-                            sh 'curl -sf http://localhost:5000/api/health'
-                        }
-                    }
+            steps {
+                sh 'docker-compose down --remove-orphans || true'
+                sh 'docker-compose up -d --build'
+                sh 'sleep 10 && docker exec ecom_backend node src/config/migrate.js'
+                retry(5) {
+                    sleep(time: 10, unit: 'SECONDS')
+                    sh 'curl -sf http://localhost:5000/api/health'
                 }
             }
         }
 
-        // ── 9. PRODUCTION APPROVAL GATE (main branch only) ───────────────
+        // ── 9. PRODUCTION APPROVAL GATE ───────────────────────────────────
         stage('Promote to Production?') {
-            when { branch 'main' }
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
                     input message: 'All checks passed. Deploy to Production?',
@@ -192,8 +164,9 @@ pipeline {
             echo "Pipeline FAILED. Check the logs above."
         }
         always {
-            // Clean up dangling images to save disk
-            sh 'docker image prune -f || true'
+            node('built-in') {
+                sh 'docker image prune -f || true'
+            }
         }
     }
 }
