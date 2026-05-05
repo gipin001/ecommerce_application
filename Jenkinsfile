@@ -76,7 +76,11 @@ pipeline {
                           -e SONAR_TOKEN=${SONAR_AUTH_TOKEN} \
                           -v "$(pwd):/usr/src" \
                           sonarsource/sonar-scanner-cli:latest \
-                          -Dsonar.projectBaseDir=/usr/src
+                          -Dsonar.projectBaseDir=/usr/src \
+                          -Dsonar.projectKey=ecommerce_application \
+                          -Dsonar.projectName="Ecommerce Application" \
+                          -Dsonar.sources=backend/src,frontend/src \
+                          -Dsonar.exclusions=**/node_modules/**,**/.next/**
                     '''
                 }
             }
