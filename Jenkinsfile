@@ -80,7 +80,8 @@ pipeline {
                           -Dsonar.projectKey=ecommerce_application \
                           -Dsonar.projectName="Ecommerce Application" \
                           -Dsonar.sources=. \
-                          -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/coverage/**
+                          -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/coverage/** \
+                          -Dsonar.working.directory=/usr/src/.scannerwork
                     '''
                 }
             }

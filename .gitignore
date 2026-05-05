@@ -39,7 +39,8 @@ Thumbs.db
 infra/volumes/
 
 # SonarQube scanner cache
-.scannerwork/
+.scannerwork
+**/.scannerwork
 
 # Coverage reports
 coverage/
